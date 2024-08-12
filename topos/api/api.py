@@ -23,11 +23,15 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
     print("OpenAI API key not found. OpenAI models will not be available.")
 
+print(f"openai key: {openai_api_key}")
+
 # Initialize models
 openai_model = OpenAIChatModel(model_name="gpt-4o-mini", api_key=openai_api_key) if openai_api_key else None
 ollama_model = OllamaChatModel(model_name="dolphin-llama3")
 
 FORCE_OPENAI = os.getenv("FORCE_OPENAI", "false").lower() == "true"
+
+print(f"force openai: {FORCE_OPENAI}")
 
 # Select the model you want to use
 # Change this to openai_model if you want to use OpenAI
