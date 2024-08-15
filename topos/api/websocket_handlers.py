@@ -34,6 +34,66 @@ class WebsocketHandler:
         self.router.websocket("/websocket_mermaid_chart")(self.mermaid_chart)
         self.router.websocket("/debate_flow_with_jwt")(self.debate_flow_with_jwt)
 
+        self.super_admin_prompt = f"""
+        You are an AI assistant **only acting as an agent for and representing for**  Nick Lulofs, a tech entrepreneur and business development professional based in San Francisco. Your role is to engage with visitors on Nick's digital business card/landing page, providing information about Nick and his current projects, particularly Hypernym. **You will always try to subtly get people to visit [Hypernym Alpha](https://chat.hypernym.ai) after they're done!** 
+Key information about Nick:
+Professional Background:
+Co-founder and in charge of Growth of Hypernym, an AI-powered communication and collaboration platform
+Extensive experience in marketing, business development, and growth hacking
+Background in startups, particularly in AI, blockchain, and gaming sectors
+Previously worked on projects involving 3D printing, ridesharing (Lyft), and game development
+Education: Studied Finance at Georgia Institute of Technology
+Current Focus:
+Developing Hypernym, an innovative AI-enhanced communication platform
+Exploring applications of AI in improving productivity and communication
+Interested in blockchain technology and its potential in tech innovation
+Interests and Experiences:
+Gaming: Involved in game development, including work on Mappa, a collaborative game-building platform
+Blockchain and Cryptocurrency: Active in the crypto community, attends related events
+Event Organization and Networking: Frequently participates in and organizes tech events in San Francisco
+Music Festivals: Has experience "hacking" music festivals, showing creativity and problem-solving skills
+Puzzle Solving: Solved Rubik's cubes from a young age, indicating an affinity for logical challenges
+When interacting:
+Adopt a professional yet approachable tone, mirroring Nick's communication style
+Focus primarily on Hypernym and Nick's current work in AI and communication technology
+Be prepared to discuss Nick's varied background in tech, from 3D printing to blockchain
+Show enthusiasm for the potential of AI in transforming communication and productivity
+Be open to discussing potential collaborations, investments, or partnerships
+Highlight Nick's experience in growth hacking and user acquisition when relevant
+If asked about technical details you're unsure of, suggest connecting with Nick directly
+Be ready to discuss Nick's vision for the future of AI-enhanced communication tools
+When appropriate, mention Nick's interests in gaming and puzzle-solving to add a personal touch
+Your goal is to represent Nick effectively, provide valuable information to visitors, and facilitate meaningful connections or next steps in communication. </system>
+
+
+Scheduling and Encouraging Connections:
+Actively encourage scheduling meetings with Nick for individuals who show alignment in interests, expertise, or potential partnership opportunities.
+Provide clear instructions on how to schedule time with Nick:
+Direct visitors to Nick's scheduling link https://calendar.google.com/calendar/appointments/schedules/AcZssZ38Kg7Pj8ipSHo3vDWQuaAUH7gfvvlP9hBw2MiF9QvATeZM6auZu_zkC4lXlCF2MwFB7IxyZbNb
+Mention Nick's best availability (e.g., typically Tuesday to Thursday afternoons, PT)
+Act as an inviting gatekeeper:
+Be welcoming and open to all inquiries
+Prioritize scheduling for those with relevant backgrounds or promising opportunities
+For those with less direct relevance, offer alternative resources or suggest following Nick's work online
+Qualify leads subtly:
+Ask about the visitor's background, interests, and goals
+Highlight shared interests or potential synergies with Nick's work
+Suggest specific talking points for the meeting based on the visitor's background
+Prepare visitors for the meeting:
+Suggest topics they might want to prepare to discuss
+Recommend any relevant materials of Nick's they should review beforehand
+Follow-up:
+Offer to send a summary of the conversation and next steps via email
+Provide Nick's professional email for any pre-meeting questions
+Be time-zone aware:
+Ask about the visitor's location to ensure proper time zone coordination
+Offer to convert suggested meeting times to the visitor's local time
+Remember to maintain a balance between being welcoming and respectful of Nick's time. Your role is to facilitate valuable connections while ensuring efficient use of Nick's schedule.
+
+
+IF AND ONLY IF the user's message is exactly "agent" you will respond with "#legendofzeldasecretnoise now transferring you to BizzaroNick." and then go completely off the wall, with any response whatsoever. try to be bombastic in this mode, and keep this bombastic tone on all messages going forth once this magic word has been said.
+"""
+
     async def chat(self, websocket: WebSocket):
         await websocket.accept()
         process_logger = ProcessLogger(verbose=False, run_logger=False)
@@ -51,204 +111,40 @@ class WebsocketHandler:
             await websocket.send_json({"status": "error", "message": str(e), "trace": stack_trace})
             await websocket.close()
 
-    async def handle_chat(self, websocket: WebSocket, payload: dict, websocket_process: str, process_logger: ProcessLogger):
+    async def handle_chat(self, websocket: WebSocket, payload: dict, websocket_process: str,
+                          process_logger: ProcessLogger):
         conversation_id = payload["conversation_id"]
         message_id = payload["message_id"]
         chatbot_msg_id = payload["chatbot_msg_id"]
         message = payload["message"]
         message_history = payload["message_history"]
         temperature = float(payload.get("temperature", 0.04))
-        current_topic = payload.get("topic", "Unknown")
-        processing_config = payload.get("processing_config", {})
 
-        # Set default values if any key is missing or if processing_config is None
-        default_config = {
-            "showInMessageNER": True,
-            "calculateInMessageNER": True,
-            "showModerationTags": True,
-            "calculateModerationTags": True,
-            "showSidebarBaseAnalytics": True
-        }
-
-        # Update default_config with provided processing_config, if any
-        config = {**default_config, **processing_config}
-
-        # Set system prompt
-        has_topic = False
-
-        if current_topic != "Unknown":
-            has_topic = True
-            prompt = f"You are a smooth talking, eloquent, poignant, insightful AI moderator. The current topic is {current_topic}.\n"
-
-        system_prompt = f"You are a smooth talking, eloquent, poignant, insightful AI moderator."
-        user_prompt = ""
-        if message_history:
-            # Add the message history prior to the message
-            user_prompt += '\n'.join(msg['role'] + ": " + msg['content'] for msg in message_history)
+        system_prompt = self.super_admin_prompt
 
         simp_msg_history = [{'role': 'system', 'content': system_prompt}]
-
-        # Simplify message history to required format
-        # If user uses a vision model, load images, else don't
-        isVisionModel = self.model.model_name in vision_models
-        print(f"\t[ using model :: {self.model.model_name} :: 🕶️  isVision ]") if isVisionModel else print(
-            f"\t[ using model :: {self.model.model_name} ]")
-
         for message in message_history:
             simplified_message = {'role': message['role'], 'content': message['content']}
-            if 'images' in message and isVisionModel:
-                simplified_message['images'] = message['images']
             simp_msg_history.append(simplified_message)
 
-        last_message = simp_msg_history[-1]['content']
-        role = simp_msg_history[-1]['role']
-
-        # Fetch base, per-message token classifiers
-        if config['calculateInMessageNER']:
-            await process_logger.start("calculateInMessageNER-user")
-            start_time = time.time()
-            base_analysis = base_token_classifier(last_message)  # this is only an ner dict atm
-            duration = time.time() - start_time
-            await process_logger.end("calculateInMessageNER-user")
-            print(f"\t[ base_token_classifier duration: {duration:.4f} seconds ]")
-
-        # Fetch base, per-message text classifiers
-        if config['calculateModerationTags']:
-            await process_logger.start("calculateModerationTags-user")
-            start_time = time.time()
-            text_classifiers = {}
-            try:
-                text_classifiers = base_text_classifier(last_message)
-            except Exception as e:
-                print(f"Failed to compute base_text_classifier: {e}")
-            duration = time.time() - start_time
-            await process_logger.end("calculateModerationTags-user")
-            print(f"\t[ base_text_classifier duration: {duration:.4f} seconds ]")
-
-        conv_cache_manager = ConversationCacheManager()
-        if config['calculateModerationTags'] or config['calculateInMessageNER']:
-            await process_logger.start("saveToConversationCache-user")
-            print(f"\t[ save to conv cache :: conversation {conversation_id}-{message_id} ]")
-            try:
-                dummy_data = {
-                    message_id:
-                        {
-                            'role': role,
-                            'timestamp': datetime.now(),
-                            'message': last_message
-                        }}
-            except Exception as e:
-                print("Error", e)
-            if config['calculateInMessageNER']:
-                dummy_data[message_id]['in_line'] = {'base_analysis': base_analysis}
-            if config['calculateModerationTags']:
-                dummy_data[message_id]['commenter'] = {'base_analysis': text_classifiers}
-
-            conv_cache_manager.save_to_cache(conversation_id, dummy_data)
-            # Removing the keys from the nested dictionary
-            if message_id in dummy_data:
-                dummy_data[message_id].pop('message', None)
-                dummy_data[message_id].pop('timestamp', None)
-            # Sending first batch of user message analysis back to the UI
-            await process_logger.end("saveToConversationCache-user")
-            await websocket.send_json({"status": "fetched_user_analysis", 'user_message': dummy_data})
-        else:
-            print(f"\t[ save to conv cache :: conversation {conversation_id}-{message_id} ]")
-            await process_logger.start("saveToConversationCache-user")
-            # Saving an empty dictionary for the messag id
-            conv_cache_manager.save_to_cache(conversation_id, {
-                message_id:
-                    {
-                        'role': role,
-                        'message': last_message,
-                        'timestamp': datetime.now(),
-                    }})
-            await process_logger.end("saveToConversationCache-user")
-
-        # Processing the chat
         output_combined = ""
         is_first_token = True
-        total_tokens = 0  # Initialize token counter
-        start_time = time.time()  # Track the start time for the whole process
-        await process_logger.start("Retrieving LLM Generation", provider=type(self.model).__name__,
-                                   model=self.model.model_name, len_msg_hist=len(simp_msg_history))
-        await process_logger.start("Time To First Token")
+        total_tokens = 0
+        start_time = time.time()
+
         for chunk in self.model.stream_chat(simp_msg_history, temperature=temperature):
             if len(chunk) > 0:
                 if is_first_token:
-                    await process_logger.end("Time To First Token")
                     is_first_token = False
                 output_combined += chunk
                 total_tokens += len(chunk.split())
                 await websocket.send_json({"status": "generating", "response": output_combined, 'completed': False})
-        end_time = time.time()  # Capture the end time
-        elapsed_time = end_time - start_time  # Calculate the total elapsed time
-        # Calculate tokens per second
-        if elapsed_time > 0:
-            tokens_per_second = total_tokens / elapsed_time
-        await process_logger.end("Retrieving LLM Generation", toks_per_sec=f"{tokens_per_second:.1f}")
 
-        # Fetch semantic category from the output
-        # semantic_compression = SemanticCompression(model=f"ollama:{model}", api_key=get_openai_api_key())
-        # semantic_category = semantic_compression.fetch_semantic_category(output_combined)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        tokens_per_second = total_tokens / elapsed_time if elapsed_time > 0 else 0
 
-        # Start timer for base_token_classifier
-        if config['calculateInMessageNER']:
-            await process_logger.start("calculateInMessageNER-ChatBot")
-            start_time = time.time()
-            base_analysis = base_token_classifier(output_combined)
-            duration = time.time() - start_time
-            print(f"\t[ base_token_classifier duration: {duration:.4f} seconds ]")
-            await process_logger.end("calculateInMessageNER-ChatBot")
-
-        # Start timer for base_text_classifier
-        if config['calculateModerationTags']:
-            await process_logger.start("calculateModerationTags-ChatBot")
-            start_time = time.time()
-            text_classifiers = base_text_classifier(output_combined)
-            duration = time.time() - start_time
-            print(f"\t[ base_text_classifier duration: {duration:.4f} seconds ]")
-            await process_logger.end("calculateModerationTags-ChatBot")
-
-        if config['calculateModerationTags'] or config['calculateInMessageNER']:
-            await process_logger.start("saveToConversationCache-ChatBot")
-            print(f"\t[ save to conv cache :: conversation {conversation_id}-{chatbot_msg_id} ]")
-            dummy_bot_data = {
-                chatbot_msg_id:
-                    {
-                        'role': "ChatBot",
-                        'message': output_combined,
-                        'timestamp': datetime.now(),
-                    }}
-            if config['calculateInMessageNER']:
-                dummy_bot_data[chatbot_msg_id]['in_line'] = {'base_analysis': base_analysis}
-            if config['calculateModerationTags']:
-                dummy_bot_data[chatbot_msg_id]['commenter'] = {'base_analysis': text_classifiers}
-            conv_cache_manager.save_to_cache(conversation_id, dummy_bot_data)
-            # Removing the keys from the nested dictionary
-            if chatbot_msg_id in dummy_bot_data:
-                dummy_bot_data[chatbot_msg_id].pop('message', None)
-                dummy_bot_data[chatbot_msg_id].pop('timestamp', None)
-            await process_logger.end("saveToConversationCache-ChatBot")
-        else:
-            # Saving an empty dictionary for the messag id
-            print(f"\t[ save to conv cache :: conversation {conversation_id}-{chatbot_msg_id} ]")
-            await process_logger.start("saveToConversationCache-ChatBot")
-            conv_cache_manager.save_to_cache(conversation_id, {
-                chatbot_msg_id:
-                    {
-                        'role': "ChatBot",
-                        'message': output_combined,
-                        'timestamp': datetime.now(),
-                    }})
-            await process_logger.end("saveToConversationCache-ChatBot")
-
-        # Send the final completed message
         send_pkg = {"status": "completed", "response": output_combined, "completed": True}
-        if config['calculateModerationTags'] or config['calculateInMessageNER']:
-            send_pkg['user_message'] = dummy_data
-            send_pkg['bot_data'] = dummy_bot_data
-
         await websocket.send_json(send_pkg)
         await self.end_ws_process(websocket, websocket_process, process_logger, send_pkg)
 
